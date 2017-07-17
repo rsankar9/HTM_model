@@ -43,14 +43,15 @@ for i, j, k in np.ndindex(m, n, d):
   #      "C" : np.array([0,1,0,1])}
 S = { "A" : np.array([1,0,0,0,1,0,0,0,0,0,0,0,1,0,0,0]),
       "B" : np.array([0,0,1,0,0,0,0,0,1,0,0,0,0,0,0,1]),
-      "C" : np.array([0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0]) }
+      "C" : np.array([0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0]),
+      "end" : np.array([0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0])  }
 
 W = np.zeros((n), dtype = int)
 
 #print "P", P['t']
 #print "A", A['t']
 
-seq = ["A", "B", "C"]
+seq = ["A", "B", "C", "end"]
 
 def reinforce(x, y, z, D):
     delta = 0
