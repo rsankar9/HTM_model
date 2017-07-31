@@ -96,6 +96,7 @@ for ntrials in range(30):
 	for syllable in seq:
 		W = S[syllable]									# marks winning columns
 		A['t'] = 0
+		active_cells = []
 		for j in np.ndindex(n):
 			if W[j] == 1:
 				found_active = 0
@@ -103,9 +104,11 @@ for ntrials in range(30):
 					if P['t-1'][i][j] == 1:
 						A['t'][i][j] = 1					# cell activated if present in winning column and if predicted previously
 						found_active = 1
+						active_cells.insert(0, (i,j))
 				if found_active==0:
 					for i in np.ndindex(m):
 						A['t'][i][j] = 1				# cell activated if present in winning column and if no cell in the column had been predicted
+						active_cells.insert(0, (i,j))
 	    		
 		for i, j in np.ndindex(m, n):					# computing predictive state for this time step
 		    P['t'][i][j] = 0
@@ -119,13 +122,13 @@ for ntrials in range(30):
 		#Dpos = D > 0
 
 		Dnew = D
+		Dupdated = np.zeros((m, n), dtype = bool)
 		for i, j, k in np.ndindex(m, n, d):				# active dendritic segment reinforced if cell predicted correctly
 		    if W[j] == 1:
 		    	if P['t-1'][i][j] > 0 and count_ones_in_product_Dcon(A['t-1'], D[i][j][k]) > theta:
 		        #if P['t-1'][i][j] > 0 and sum(sum(Dcon[i][j][k] * A['t-1'])) > theta:
 		        	reinforce(i, j, k, D, Dnew)
 
-#		if correctly_predicted == 'false':				
 		for j in np.ndindex(n):						
 		    if W[j] == 1:
 		    	tempSum = 0
@@ -142,7 +145,20 @@ for ntrials in range(30):
 			        	if count_ones_in_product_Dpos(A['t-1'], D[i][j][k]) == maxSum:
 				    #    if sum(sum(Dpos[i][j][k] * A['t-1'])) == maxSum:
 				        	reinforce(i, j, k, D, Dnew)
-				        	break
+				        	Dupdated[i][j] = 1			# match found, no need to update synapses
+				        else:							# no match found, hence updating synapses
+							list_active = active_cells	
+							np.random.shuffle(list_active)
+							for l in np.ndindex(s):
+								if D[i][j][k][l]["cw"]<beta:
+									if len(list_active)==0:		
+										break
+									r = np.random.randint(0, m*n)
+									pos = r%len(list_active)			# randomly pick an active cell
+									Dnew[i][j][k][l]["x"] = list_active[pos][0]		# replace existing synapse with synapse to active cell
+									Dnew[i][j][k][l]["y"] = list_active[pos][1]
+									Dnew[i][j][k][l]["cw"] = beta + np.random.random()*(1-beta)	# to ensure it has a chance to become a strong connection
+									list_active.pop(pos)
 
 		for i, j, k in np.ndindex(m, n, d):			# to negatively reinforce active segments of inactive cells
 			if A['t'][i][j] == 0 and count_ones_in_product_Dcon(A['t-1'], D[i][j][k]) > theta:
@@ -157,12 +173,14 @@ for ntrials in range(30):
 		print P['t-1']
 		print "A"
 		print A['t']
-#		print "D"
-#		print D[2][3][1][2]
+
+
 		D = Dnew
 		P['t-1'] = P['t']
 		A['t-1'] = A['t']
 		A['t'] = 0
+
+
 	# reset on encountering "end" syllable
 	P['t-1'] = np.zeros((m, n), dtype = [("t", int), ("t-1", int)])	
 	A['t-1'] = np.zeros((m, n), dtype = [("t", int), ("t-1", int)])
