@@ -53,7 +53,7 @@ W = np.zeros((n), dtype = int)
 
 seq = ["A", "B", "C", "end"]
 
-def reinforce(x, y, z, D):
+def reinforce(x, y, z, D, Dnew):
     delta = 0
     for l in np.ndindex(s):
  		syn = D[x][y][z][l]
@@ -64,7 +64,7 @@ def reinforce(x, y, z, D):
 			    #delta = pPos * Dpos[i][j][k] * A['t-1'] - pNeg * Dpos[i][j][k]
 
 
-def decay(x, y, z, D):
+def decay(x, y, z, D, Dnew):
     delta = 0
     #for s in D[x][y][z]:
     for l in np.ndindex(s):
@@ -93,20 +93,20 @@ def count_ones_in_product_Dpos(G, H):
 
 for ntrials in range(30):
 	# ---- Step 2: Computing cell states ---- #
-	for sPos in range(len(seq)):
-		W = S[seq[sPos]]								# marks winning columns
-		for i, j in np.ndindex(m, n):
-			A['t'][i][j] = 0
+	for syllable in seq:
+		W = S[syllable]									# marks winning columns
+		A['t'] = 0
+		for j in np.ndindex(n):
 			if W[j] == 1:
-				if P['t-1'][i][j] == 1:
-					A['t'][i][j] = 1					# cell activated if present in winning column and if predicted previously
-		        else:
-		        	tempSum = 0
-		        	for l in np.ndindex(m):
-		        		tempSum += P['t-1'][l][j]
-		        	if tempSum == 0:
-		        		A['t'][i][j] = 1				# cell activated if present in winning column and if no cell in the column had been predicted
-		
+				found_active = 0
+				for i in np.ndindex(m):
+					if P['t-1'][i][j] == 1:
+						A['t'][i][j] = 1					# cell activated if present in winning column and if predicted previously
+						found_active = 1
+				if found_active==0:
+					for i in np.ndindex(m):
+						A['t'][i][j] = 1				# cell activated if present in winning column and if no cell in the column had been predicted
+	    		
 		for i, j in np.ndindex(m, n):					# computing predictive state for this time step
 		    P['t'][i][j] = 0
 		    for q in np.ndindex(d):
@@ -118,14 +118,12 @@ for ntrials in range(30):
 		# ---- Step 3: Learning ---- #
 		#Dpos = D > 0
 
-#		correctly_predicted = 'false'
 		Dnew = D
 		for i, j, k in np.ndindex(m, n, d):				# active dendritic segment reinforced if cell predicted correctly
 		    if W[j] == 1:
 		    	if P['t-1'][i][j] > 0 and count_ones_in_product_Dcon(A['t-1'], D[i][j][k]) > theta:
 		        #if P['t-1'][i][j] > 0 and sum(sum(Dcon[i][j][k] * A['t-1'])) > theta:
-		        	reinforce(i, j, k, D)
-		        	correctly_predicted = 'true'
+		        	reinforce(i, j, k, D, Dnew)
 
 #		if correctly_predicted == 'false':				
 		for j in np.ndindex(n):						
@@ -143,20 +141,24 @@ for ntrials in range(30):
 			        for i, k in np.ndindex(m, d):
 			        	if count_ones_in_product_Dpos(A['t-1'], D[i][j][k]) == maxSum:
 				    #    if sum(sum(Dpos[i][j][k] * A['t-1'])) == maxSum:
-				        	reinforce(i, j, k, D)
+				        	reinforce(i, j, k, D, Dnew)
 				        	break
 
 		for i, j, k in np.ndindex(m, n, d):			# to negatively reinforce active segments of inactive cells
 			if A['t'][i][j] == 0 and count_ones_in_product_Dcon(A['t-1'], D[i][j][k]) > theta:
 		#	if A['t'][i][j] == 0 and sum(sum(Dcon[i][j][k] * A['t-1'])) > theta:
-				decay(i, j, k, D)
+				decay(i, j, k, D, Dnew)
 		
+#		print "HERE3"
 		print "W"
 		print W
+#		print "HERE4"
 		print "P"
 		print P['t-1']
 		print "A"
 		print A['t']
+#		print "D"
+#		print D[2][3][1][2]
 		D = Dnew
 		P['t-1'] = P['t']
 		A['t-1'] = A['t']
