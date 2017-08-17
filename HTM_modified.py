@@ -5,16 +5,17 @@ import numpy as np
 
 n=21				# no. of columns in a layer
 m=6					# no. of cells per column
-d=4					# no. of distal segments per cell
+d=16					# no. of distal segments per cell
 s=16				# no. of potential synapses per segment
 
 beta = 0.5
 theta = 3
 synPerm = 0.21		# initial synaptic permanence
+nStepReplace = 20
 
-pPos = 0.8
-pNeg = 0.2
-pDec = 0.008
+pPos = 0.1	# 0.6
+pNeg = 0.1	# 0.4
+pDec = 0.01	# 0.008
 
 
 # ---- Step 1: Initialisation ---- #
@@ -57,7 +58,7 @@ def isSegmentActive(i, j, k, D, Mat):						# if no. of connected synapses to act
 	count = 0
 	for l in np.ndindex(s):
  		synapse = D[i][j][k][l]
-		if synapse["cw"] > beta and (Mat[synapse["y"]] & (1<<synapse["x"]))!=0:
+		if synapse["cw"] > beta and ((Mat[synapse["y"]] & (1<<synapse["x"]))!=0):
 			count = count + 1
 	return count > theta
 
@@ -72,108 +73,120 @@ def count_positive_synapses(Mat, Segment):
 def reinforce(x, y, z, D, Dnew):
 	for l in np.ndindex(s):
 		synapseOld = D[x][y][z][l]
-		synapseNew = 0
-		delta = 0
-		if A['t-1'][synapseOld["y"]] & (1<<synapseOld["x"]):
+		synapseNew = Dnew[x][y][z][l]
+		delta = 0.0
+		if ((A['t-1'][synapseOld["y"]]) & (1<<synapseOld["x"])) != 0:
 			delta = delta + pPos							# reinforcing synapses to active cells
-		#else:
-		#	delta = delta - pNeg							# negatively reinforcing synapses to inactive cells
-		synapseNew = synapseOld["cw"] + delta
-		if synapseNew < 0:
-			synapseNew = 0
-		if synapseNew > 1:
-			synapseNew = 1
-		Dnew[x][y][z][l] = synapseOld
-		Dnew[x][y][z][l]["cw"] = synapseNew
-		#temp = synapseOld["cw"] - Dnew[x][y][z][l]["cw"]
-		#if temp!=0:
-		#	print "reinforced ", temp
+		else:
+			delta = delta - pNeg							# negatively reinforcing synapses to inactive cells
+		synapseNew["cw"] = synapseOld["cw"] + delta
+		if synapseNew["cw"] < 0.0:
+			synapseNew["cw"] = 0.0
+		if synapseNew["cw"] > 1.0:
+			synapseNew["cw"] = 1.0
+
+		Dnew[x][y][z][l]["x"] = synapseOld["x"]
+		Dnew[x][y][z][l]["y"] = synapseOld["y"]
+		Dnew[x][y][z][l]["cw"] = synapseNew["cw"]
+
 
 def decay(x, y, z, D, Dnew):
-	#print "for decay"
 	for l in np.ndindex(s):
 		synapseOld = D[x][y][z][l]
 		synapseNew = Dnew[x][y][z][l]
-		#if synapseOld["cw"] > 0:
 		synapseNew["cw"] = synapseOld["cw"] - pDec
-		if synapseNew["cw"] < 0:
-			synapseNew["cw"] = 0
-		if synapseNew["cw"] > 1:
-			synapseNew["cw"] = 1
-		Dnew[x][y][z][l] = synapseNew
-		#temp = synapseOld["cw"] - synapseNew["cw"]
-		#if temp!=0:
-		#	print "decayed ", temp
+		if synapseNew["cw"] < 0.0:
+			synapseNew["cw"] = 0.0
+		if synapseNew["cw"] > 1.0:
+			synapseNew["cw"] = 1.0
+		Dnew[x][y][z][l]["x"] = synapseOld["x"]
+		Dnew[x][y][z][l]["y"] = synapseOld["y"]
+		Dnew[x][y][z][l]["cw"] = synapseNew["cw"]
+
 	
+active_cells = []
 
 for seq in sequences:
 	for ntrials in range(500):
-	# ---- Step 2: Computing cell states ---- #
 		for syllable in seq:
 			W = S[syllable]									# marks winning columns
 			A['t'] = 0
 			P['t'] = 0
+
+			# ---- Step 3: Learning ---- #
+			Dnew = np.zeros((m, n, d, s), dtype = [("x", int), ("y", int), ("cw", float)])
+			np.copyto(Dnew, D)  # Dnew = D
+
+			for j in np.ndindex(n):							# active dendritic segment reinforced if cell predicted correctly
+			    if W[j] == 1:
+			    	if P['t-1'][j] != 0:
+				    	for i in range(m):
+				    		if ((P['t-1'][j] & (1<<i)) != 0):
+				    			for k in range(d):
+					    			if isSegmentActive(i, j, k, D, A['t-1']) == True:
+				        				reinforce(i, j, k, D, Dnew)
+
+			    	else:									# if current winning column not predicted
+			    		maxSum = 0
+			    		maxRow = np.random.random_integers(0, m-1)
+			    		maxSeg = np.random.random_integers(0, d-1)
+				    	for i, k in np.ndindex(m, d):		# to find distal segment in current column closest to activation
+				    		currSum = count_positive_synapses(A['t-1'], D[i][j][k])
+				    		if maxSum < currSum:
+					    		maxSum = currSum
+					    		maxRow = i
+					    		maxSeg = k
+				    	reinforce(maxRow, j, maxSeg, D, Dnew)
+
+				    	if ntrials % nStepReplace == 0:
+					       	for i, k in np.ndindex(m, d):
+					        	if i!=maxRow or k!=maxSeg:						# no match found, hence updating synapses
+					        		list_active = list(active_cells)
+					        		np.random.shuffle(list_active)
+					        		for l in np.ndindex(s):
+					        			if len(list_active) == 0:
+					        				break
+										if D[i][j][k][l]["cw"] < beta:			# maybe it's needed for some other syllable if cw > beta
+											r = np.random.randint(0, m*n)
+											pos = r%len(list_active)			# randomly pick an active cell
+											Dnew[i][j][k][l]["x"] = list_active[pos][0]		# replace existing synapse with synapse to active cell
+											Dnew[i][j][k][l]["y"] = list_active[pos][1]
+											Dnew[i][j][k][l]["cw"] = beta + np.random.random()*(1-beta)	# synPerm	# to ensure it has a chance to become a strong connection
+											list_active.pop(pos)
+									if len(list_active) == 0:
+										break
+
+	# ---- Step 2: Computing cell states ---- #
+
 			active_cells = []
+
 			for j in np.ndindex(n):
 				A['t'][j] = 0
 				P['t'][j] = 0
 				if W[j] == 1:
 					if P['t-1'][j] != 0:
-						A['t'][j] = P['t-1'][j]			# cell activated if present in winning column and if predicted previously
+						A['t'][j] = P['t-1'][j]				# cell activated if present in winning column and if predicted previously
 					else:
 						A['t'][j] = pow(2,m)-1				# cell activated if present in winning column and if no cell in the column had been predicted
 					
 					for i in range(m):
 						if (A['t'][j] & (1 << i)) != 0:
-							active_cells.insert(0, (i,j))
-		    		
-			for i,j in np.ndindex(m,n):						# computing predictive state for this time step
-			    for k in np.ndindex(d):
-			    	if isSegmentActive(i, j, k, D, A['t']) == True:
-			    		P['t'][j] = P['t'][j] | 1<<i
-			    		break
-			
-			# ---- Step 3: Learning ---- #
-			Dnew = np.zeros((m, n, d, s), dtype = [("x", int), ("y", int), ("cw", float)])
-			for j in np.ndindex(n):							# active dendritic segment reinforced if cell predicted correctly
-			    if W[j] == 1:
-			    	if P['t-1'][j] != 0:
-				    	for i in range(m):
-				    		if (P['t-1'][j] & (1<<i) != 0) and isSegmentActive(i, j, k, D, A['t-1']) == True:
-				        		reinforce(i, j, k, D, Dnew)
+							active_cells.append([i,j])
 
-			    	else:									# if current winning column not predicted
-			    		maxSum = 0
-			    		maxRow = 0
-			    		maxSeg = 0
-				    	for i, k in np.ndindex(m, d):		# to find distal segment in current column closest to activation
-				    		maxSum = max(maxSum, count_positive_synapses(A['t-1'], D[i][j][k]))
-				    		maxRow = i
-				    		maxSeg = k
-				    	reinforce(maxRow, j, maxSeg, D, Dnew)
-
-				        for i, k in np.ndindex(m, d):
-
-				        	if i!=maxRow or k!=maxSeg:						# no match found, hence updating synapses
-								list_active = active_cells	
-								np.random.shuffle(list_active)
-
-								for l in np.ndindex(s):
-									if len(list_active)==0:		
-										break
-									if D[i][j][k][l]["cw"]<beta:			# maybe it's needed for some other syllable if cw > beta
-										r = np.random.randint(0, m*n)
-										pos = r%len(list_active)			# randomly pick an active cell
-										Dnew[i][j][k][l]["x"] = list_active[pos][0]		# replace existing synapse with synapse to active cell
-										Dnew[i][j][k][l]["y"] = list_active[pos][1]
-										Dnew[i][j][k][l]["cw"] = beta + np.random.random()*(1-beta)	# synPerm	# to ensure it has a chance to become a strong connection
-										list_active.pop(pos)
-
-			for j in range(n):												# to negatively reinforce active segments of inactive cells
+		    	for j in range(n):												# to negatively reinforce active segments of inactive cells
 				if A['t'][j] == 0:
 					for i, k in np.ndindex(m, d):
 						if isSegmentActive(i, j, k, D, A['t-1']) == True:
 							decay(i, j, k, D, Dnew)
+
+			for i,j in np.ndindex(m,n):						# computing predictive state for this time step
+			    for k in np.ndindex(d): 
+			    	if isSegmentActive(i, j, k, Dnew, A['t']) == True:
+			    		P['t'][j] = P['t'][j] | 1<<i
+			    		break
+			
+			np.copyto(D, Dnew) # D = Dnew
+
 			
 			out = ""
 			outputW = A['t'] > 0
@@ -187,27 +200,33 @@ for seq in sequences:
 				
 			for syll in seq:
 				if ((predW & S[syll]) == S[syll]).all():
-					pred = pred+syll
+					pred = pred + syll
 
 			if (ntrials+1)%100==0:		
 				print "trial: #", ntrials
 				print "input syllable: ", syllable
 				print W
 				print "predicted: ", pred
-				print P['t-1']
+				if syllable == "B":
+					print P['t-1']
 				print "output syllable: ", out
-				print A['t']
+				if syllable == "B":
+					print A['t']
 	
-			D = Dnew
+			P['t-1'] = 0
+			A['t-1'] = 0
 			P['t-1'] = P['t']
 			A['t-1'] = A['t']
 			A['t'] = 0
 			P['t'] = 0
-
-
+			
 		# reset on encountering "end" syllable
 		P['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])	
 		A['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])
+		active_cells = []
+		
+
+
 
 print "Testing"
 
