@@ -13,7 +13,7 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 	beta = 0.5					# synaptic connection threshold
 	theta = 3					# segment activation threshold
 	synPerm = 0.21				# initial synaptic permanence
-	nStepReplace = arg_nTrainingTrials
+	nStepReplace = arg_nStepReplace
 
 	pPos = 0.1					# long term potentiation
 	pNeg = 0.1					# long term depression
@@ -21,7 +21,7 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 	nTrainingTrials = arg_nTrainingTrials
 
 	rSeed = np.random.randint(0,1e7)
-	#rSeed = 0
+	#rSeed = 0					# 2227572
 	np.random.seed(rSeed)
 
 	# ---- Step 1: Initialisation ---- #
@@ -54,26 +54,29 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 	      "Y" : np.array([1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,1]), 
 	      "end" : np.array([0,0,1,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0])  }	# encoding for each syllable
 
-	# seq1 = ["A", "B", "C", "D", "E", "end"]
+	# seq1 = ["A", "B", "C", "D", "E"]
 	# seq2 = ["X", "B", "C", "D", "Y", "end"]
 
-	# seq1 = ["A", "B", "C", "D", "end"]
-	# seq2 = ["X", "B", "C", "Y", "end"]
-	# seq3 = ["E", "B", "C", "F", "end"]
+	#seq1 = ["A", "B", "end"]
+	#seq2 = ["X", "B", "C", "Y"]
+	#seq3 = ["E", "B", "C", "F"]
 
-	seq1 = ["A", "B", "F", "C"]
-	seq2 = ["X", "B", "F", "D"]
+	seq1 = ["A", "B", "C", "D"]
+	seq2 = ["X", "B", "C", "Y"]
 
 	sequences = [seq1, seq2]								# list of sequences to be trained on
 
-	test1 = ["A", "B", "F"]
-	test2 = ["X", "B", "F"]
+	test1 = ["A", "B", "C"]
+	test2 = ["X", "B", "C"]
+	tests = [test1, test2]
+	#test2 = ["X", "B", "C", "Y"]
+	#test3 = ["E", "B", "C", "F"]
+	#test4 = ["X", "B", "F", "D"]
 
 	tests = [test1, test2]										# list of sequences to be tested on
 
 	W = np.zeros((n), dtype = int)								# feed-forward input representing a syllable
 									
-
 	def isSegmentActive(i, j, k, D, Mat):						# if no. of connected synapses to active cells > theta in any distal segment of current cell
 		segment = D[i][j][k]
 		connectedSynapses = segment["cw"] > beta
@@ -154,8 +157,19 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 		# 	Dnew[x][y][z][l]["y"] = synapseOld["y"]
 		# 	Dnew[x][y][z][l]["cw"] = synapseNew["cw"]
 			
-
-		
+	def repr_human(Mat):
+		text = ""
+		for i in range(m):
+			row = ""
+			for j in range(n):
+				if Mat[j] & (1<<i) != 0:
+					row += "+"									#	+ -> Active
+				else:	
+					row += "-"									#	- -> Inactive
+			text += row
+			text += '\n'
+		return text
+	
 	active_cells = []
 	training_results = []
 
@@ -277,12 +291,11 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 				if ntrials == nTrainingTrials - 1:		
 					syllable_result = {}
 					syllable_result["prediction"] = pred
-					syllable_result["P['t-1']"] = str(P['t-1'])
+					syllable_result["P['t-1']"] = repr_human(P['t-1'])
 					syllable_result["output"] = out
-					syllable_result["A['t']"] = str(A['t'])
+					syllable_result["A['t']"] = repr_human(A['t'])
 					current_result.append(syllable_result)
 
-		
 				P['t-1'] = 0
 				A['t-1'] = 0
 				P['t-1'] = P['t']
@@ -291,8 +304,6 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 				P['t'] = 0
 				
 			# reset on encountering "end" syllable
-			# P['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])	
-			# A['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])
 			P['t-1'] = 0
 			A['t-1'] = 0
 			active_cells = []
@@ -304,10 +315,16 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 
 
 	print "Testing"
-
+	
 	testing_results = []
+	predictions = []
+	got_1_flag = False
+	got_2_flag = False
+	got_both_flag = False
+
 	for test in tests:
 		current_result = []
+		seq_predicted = [test[0]]
 		for syllable in test:
 			W = S[syllable]										# marks winning columns
 			A['t'] = 0
@@ -348,10 +365,11 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 			
 			syllable_result = {}
 			syllable_result["prediction"] = pred
-			syllable_result["P['t']"] = str(P['t'])
+			syllable_result["P['t']"] = repr_human(P['t'])
 			syllable_result["output"] = out
-			syllable_result["A['t']"] = str(A['t'])
+			syllable_result["A['t']"] = repr_human(A['t'])
 			current_result.append(syllable_result)
+			seq_predicted.append(pred)
 
 			P['t-1'] = 0
 			A['t-1'] = 0
@@ -360,15 +378,20 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 			A['t'] = 0
 			P['t'] = 0
 		
-		# P['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])	
-		# A['t-1'] = np.zeros((n), dtype = [("t", int), ("t-1", int)])
 		P['t-1'] = 0
 		A['t-1'] = 0
 		testing_results.append({
 			"Test Result": current_result 
 		})
-			
-	print "Writing to json file"
+		predictions.append(seq_predicted)
+	if predictions[0] == sequences[0]:
+		got_1_flag = True
+	if predictions[1] == sequences[1]:
+		got_2_flag = True
+	if predictions == sequences:
+		got_both_flag = True
+
+	print "Writing to json file: ", resFile
 	layer_parameters = {
 		"no. of columns in a layer [n]": n,
 		"no. of cells per column [m]": m,
@@ -412,4 +435,5 @@ def HTM(arg_d, arg_s, arg_nStepReplace, arg_nTrainingTrials, resFile):
 	}
 
 	with open(resFile, 'w') as outfile:  
-	    json.dump(Data, outfile, sort_keys=True, indent=4)
+	    json.dump(Data, outfile, sort_keys=True, indent=4, separators=(',', ':\t'))
+	return got_1_flag, got_2_flag, got_both_flag
