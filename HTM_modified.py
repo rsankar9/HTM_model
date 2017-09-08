@@ -4,30 +4,31 @@
 import json
 import numpy as np
 
-def HTM(resFile):
+def HTM(resFile, arg_s, arg_d, arg_nRC):
     n=21                        # no. of columns in a layer
-    m=6                         # no. of cells per column
-    d=1                     # no. of distal segments per cell
-    s=7                        # no. of potential synapses per segment
+    m=6                        # no. of cells per column
+    d=arg_d                     # no. of distal segments per cell
+    s=arg_s                        # no. of potential synapses per segment
 
     beta = 0.5                  # synaptic connection threshold
     theta = 3                   # segment activation threshold
     synPerm = 0.21              # initial synaptic permanence
-    nStepReplace = 0#10
+    #nStepReplace = 0#10
 
     pPos = 0.2                  # long term potentiation
     pNeg = 0.2                  # long term depression
     pDec = 0.02                 # constant decay
-    nTrainingTrials = 5
-    nRepConsecutive = 10
+    nTrainingTrials = 200
+    nRepConsecutive = arg_nRC
+    nTrainingBlocks = nTrainingTrials/nRepConsecutive
 
     initialisingLimit = beta
-    chooseMax = 1               # 1 -> on 0 -> off
+    chooseMax = 0               # 1 -> on 0 -> off
     maxCondition = 2            # 0 -> count connected synapses 1 -> find closest to activation by summation 2 -> count positive synapses
     replaceSynapses = 1         # 0 -> off 1 -> on
 
     rSeed = np.random.randint(0,1e7)
-    #rSeed = 0                  # 2227572
+    #rSeed = 1990027                  # 0
     np.random.seed(rSeed)
 
     # ---- Step 1: Initialisation ---- #
@@ -37,12 +38,13 @@ def HTM(resFile):
     Dnew = np.zeros((m, n, d, s), dtype = [("x", int), ("y", int), ("cw", float)])
 
     for i, j, k, l in np.ndindex(m, n, d, s):                               # initialising each distal segment with synapses to random cells with random strength
-        x = np.random.random_integers(0, m-1)
-        y = np.random.random_integers(0, n-1)
-        cw = np.random.random()
-        while x == i and y==j:
-            x = np.random.random_integers(0, m-1)
-            y = np.random.random_integers(0, n-1)
+        x = np.random.randint(0, m)
+        y = np.random.randint(0, n)
+        #cw = np.random.random()
+        cw = np.random.uniform(0.0,initialisingLimit)
+        # while x == i and y==j:
+        #     x = np.random.random_integers(0, m-1)
+        #     y = np.random.random_integers(0, n-1)
         while cw == 0:
             #cw = np.random.random() 
             cw = np.random.uniform(0.0,initialisingLimit)
@@ -199,7 +201,7 @@ def HTM(resFile):
 
     flagAltSeq = 2                                              # 0 -> Alternating; 1 -> Sequential; 2 -> Few each
 
-    for ntrials in range(nTrainingTrials):
+    for ntrials in range(nTrainingBlocks):
         for seq in sequences:
             for nr in range(nRepConsecutive):
                 current_result = []
@@ -220,8 +222,10 @@ def HTM(resFile):
                                             iSA = isSegmentActive(i, j, k, D, A['t-1'])
                                             if iSA >= theta:
                                                 reinforce(i, j, k, D, Dnew)
-                                                # if syllable == "B":
-                                                #     print "Prediction ", seq, syllable, ntrials*nRepConsecutive+nr, i, j, k, iSA
+                                                # if syllable == "C":
+                                                # print "Prediction ", seq, syllable, ntrials*nRepConsecutive+nr, i, j, k, iSA
+                                                # if syllable == "C":
+                                                #     print D[i][j][k]
                                                 
                             else:                                   # if current winning column not predicted   
                                         
@@ -230,6 +234,12 @@ def HTM(resFile):
                                 maxRow = np.random.random_integers(0, m-1)
                                 maxSeg = np.random.random_integers(0, d-1)
                                 if chooseMax == 1:
+                                    if maxCondition == 0:
+                                        maxCloseness = count_connected_synapses(A['t-1'], D[maxRow][j][maxSeg])
+                                    elif maxCondition == 1:
+                                        maxCloseness = closest_to_connected_synapses(A['t-1'], D[maxRow][j][maxSeg])
+                                    else:
+                                        maxCloseness = count_positive_synapses(A['t-1'], D[maxRow][j][maxSeg])
                                     for i, k in np.ndindex(m, d):       # to find distal segment in current column closest to activation
                                         if maxCondition == 0:
                                             currCloseness = count_connected_synapses(A['t-1'], D[i][j][k])
@@ -237,26 +247,30 @@ def HTM(resFile):
                                             currCloseness = closest_to_connected_synapses(A['t-1'], D[i][j][k])
                                         else:
                                             currCloseness = count_positive_synapses(A['t-1'], D[i][j][k])
-                                        if maxCloseness < currCloseness:
+                                        if maxCloseness <= currCloseness:
                                             maxCloseness = currCloseness
                                             maxRow = i
                                             maxSeg = k
-                                # if syllable == "B":
-                                #     print "Here ", seq, syllable, ntrials*nRepConsecutive+nr, maxRow, j, maxSeg, maxCloseness
+                                # print "Here ", seq, syllable, ntrials*nRepConsecutive+nr, maxRow, j, maxSeg, maxCloseness
+                                # if syllable == "C":
+                                #     print D[maxRow][j][maxSeg]
                                 
                                 
                                 if replaceSynapses == 1 and len(active_cells)!=0:
-                                    list_active = list(active_cells)
-                                    np.random.shuffle(list_active)
-                                    for l in np.ndindex(s):
-                                        synX = D[maxRow][j][maxSeg][l]["x"]
-                                        synY = D[maxRow][j][maxSeg][l]["y"]
-                                        if A['t-1'][synY] & (1 << synX) == 0:          # maybe it's needed for some other syllable if cw > beta
-                                            r = np.random.randint(0, m*n)
-                                            pos = r%len(list_active)            # randomly pick an active cell
-                                            Dnew[maxRow][j][maxSeg][l]["x"] = list_active[pos][0]     # replace existing synapse with synapse to active cell
-                                            Dnew[maxRow][j][maxSeg][l]["y"] = list_active[pos][1]
-                                            Dnew[maxRow][j][maxSeg][l]["cw"] = np.random.uniform(beta, 1.0) # synPerm   # to ensure it has a chance to become a strong connection
+                                    #if maxCloseness < theta:    # BEWARE - ONLY FOR MAXCOND = 2
+                                        list_active = list(active_cells)
+                                        np.random.shuffle(list_active)
+                                        for l in np.ndindex(s):
+                                            synX = D[maxRow][j][maxSeg][l]["x"]
+                                            synY = D[maxRow][j][maxSeg][l]["y"]
+                                            synCW = D[maxRow][j][maxSeg][l]["cw"]
+                                            if (A['t-1'][synY] & (1 << synX) == 0):# and synCW < beta:          # maybe it's needed for some other syllable if cw > beta
+                                                r = np.random.randint(0, m*n)
+                                                pos = r%len(list_active)            # randomly pick an active cell
+                                                Dnew[maxRow][j][maxSeg][l]["x"] = list_active[pos][0]     # replace existing synapse with synapse to active cell
+                                                Dnew[maxRow][j][maxSeg][l]["y"] = list_active[pos][1]
+                                                Dnew[maxRow][j][maxSeg][l]["cw"] = np.random.uniform(beta, 1.0) # synPerm   # to ensure it has a chance to become a strong connection
+                                                break
                                 
                                 reinforce(maxRow, j, maxSeg, D, Dnew)
                             
@@ -287,6 +301,7 @@ def HTM(resFile):
                             for i in range(m):
                                 if (A['t'][j] & (1 << i)) != 0:
                                     active_cells.append([i,j])
+
                     for i,j in np.ndindex(m,n):
                         if (A['t'][j] & 1<<i) == 0:
                             for k in np.ndindex(d):
@@ -371,7 +386,7 @@ def HTM(resFile):
                 A['t-1'] = 0
                 active_cells = []
 
-            if ntrials == nTrainingTrials - 1:
+            if ntrials == nTrainingBlocks - 1:
                 training_results.append({
                     "Training Result": current_result 
                 })
@@ -381,9 +396,9 @@ def HTM(resFile):
     
     testing_results = []
     predictions = []
-    got_1_flag = False
+    # got_1_flag = False
     # got_2_flag = False
-    # got_both_flag = False
+    got_both_flag = False
 
     for test in tests:
         current_result = []
@@ -447,12 +462,12 @@ def HTM(resFile):
             "Test Result": current_result 
         })
         predictions.append(seq_predicted)
-    if predictions[0] == sequences[0]:
-        got_1_flag = True
+    # if predictions[0] == sequences[0]:
+    #     got_1_flag = True
     # if predictions[1] == sequences[1]:
     #   got_2_flag = True
-    # if predictions == sequences:
-    #   got_both_flag = True
+    if predictions == sequences:
+      got_both_flag = True
 
     print "Writing to json file: ", resFile
     layer_parameters = {
@@ -465,7 +480,7 @@ def HTM(resFile):
         "synapse connectivity threshold [beta]": beta,
         "segment activation threshold [theta]": theta,
         "synaptic permanence [synPerm]": synPerm,
-        "synapses replaced after steps [nStepReplace]": nStepReplace,
+        #"synapses replaced after steps [nStepReplace]": nStepReplace,
         "upper limit of initialisation": initialisingLimit
     }
 
@@ -505,4 +520,4 @@ def HTM(resFile):
     with open(resFile, 'w') as outfile:  
         json.dump(Data, outfile, sort_keys=True, indent=4, separators=(',', ':\t'))
     # return got_1_flag, got_2_flag, got_both_flag
-    return got_1_flag
+    return got_both_flag
