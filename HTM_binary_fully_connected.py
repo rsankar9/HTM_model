@@ -1,378 +1,415 @@
-#import recipy
-
 # coding: utf-8
+
 import json
 import numpy as np
 
-def HTM(resFile):
-	n=21						# no. of columns in a layer
-	m=6							# no. of cells per column
-	d=5						# no. of distal segments per cell
 
-	beta = 0.5					# synaptic connection threshold
-	theta = 3					# segment activation threshold
-	synPerm = 0.21				# initial synaptic permanence
+def HTM(arg_resFile):                                       # change parameters according to which one you want to test
+    
+    # ---- Parameters ---- #
 
-	pPos = 0.2					# long term potentiation
-	pNeg = 0.2					# long term depression
-	pDec = 0.02					# constant decay
-	nTrainingTrials = 3
-	nRepConsecutive = 10
+    n = 21                                                  # no. of columns in a layer
+    m = 6                                                   # no. of cells per column
+    d = 1                                                   # no. of distal segments per cell
+    
+    beta = 0.5                                              # synaptic connection threshold
+    theta = 3                                               # segment activation threshold
+    initialisingLimit = beta                                # synapses are randomly initialised with weights between 0 and initialisingLimit
 
-	initialisingLimit = 0.5
-	chooseMax = 0				# 1 -> on 0 -> off
-	maxCondition = 1			# 0 -> count connected synapses 1-> find closest to activation by summation
+    pPos = 0.2                                              # long term potentiation
+    pNeg = 0.2                                              # long term depression
+    pDec = 0.02                                             # constant decay
+    nTrainingTrials = 200                                   # total no. of trials
+    nRepConsecutive = 5                                     # no. of consecutive trials during training for one sequence
+    nTrainingBlocks = nTrainingTrials/nRepConsecutive       # no. of training blocks
 
-	rSeed = np.random.randint(0,1e7)
-	#rSeed = 0					# 2227572
-	np.random.seed(rSeed)
+    chooseMax = 0                                           # 1 -> on; 0 -> randomly chosen (if 0, maxCondition doesn't matter)
+    maxCondition = 2                                        # 0 -> # connected synapses 1 -> closest to activation by summation
+    replaceSynapses = 1                                     # 0 -> off 1 -> on
 
-	# ---- Step 1: Initialisation ---- #
-	A = np.zeros((n), dtype = [("t", int), ("t-1", int)])
-	P = np.zeros((n), dtype = [("t", int), ("t-1", int)])
-	D = np.zeros((m, n, d, m, n), dtype = float)
-	Dnew = np.zeros((m, n, d, m, n), dtype = float)
+    testFreeFlag = 1                                        # 0 -> testing with feed-forward input; 1 -> free testing
 
-	for i, j, k, p, q in np.ndindex(m, n, d, m, n):							# initialising each distal segment with synapses to random cells with random strength
-		if i!=p or j!=q:
-			D[i][j][k][p][q] = np.random.uniform(0, initialisingLimit)								#	synPerm
+    rSeed = np.random.randint(0,1e7)                        # seed
+    np.random.seed(rSeed)
 
-	S = { "A" : np.array([1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
-	      "B" : np.array([0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
-	      "C" : np.array([0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]), 
-	      "D" : np.array([0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0]), 
-	      "E" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0]), 
-	      "F" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0]), 
-	      "G" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1]),	}	# encoding for each syllable
+    resFile = arg_resFile                                   # name of result file
+    repr_matrix_form = True                                 # 1 -> as a matrix; 0 -> whole matrix in 1 line
+    got_all_flag = True                                     # to denote if all the predictions were correct or not
 
-	# seq1 = ["A", "B", "C", "D", "E"]
-	# seq2 = ["X", "B", "C", "D", "Y", "end"]
+    seq1 = ["A", "B", "C", "G", "E"]
+    seq2 = ["D", "B", "C", "G", "F"]
 
-	seq1 = ["A", "B", "C", "G", "E"]
-	seq2 = ["D", "B", "C", "G", "F"]
-	# seq3 = ["X", "Y", "end"]
+    sequences = [seq1, seq2]                                # list of sequences to be trained on
 
-	# seq1 = ["A", "B", "C", "D"]
-	# seq2 = ["X", "B", "C", "Y"]
+    test1 = ["A", "B", "C", "G", "E"]
+    test2 = ["D", "B", "C", "G", "F"]
 
-	sequences = [seq1, seq2]								# list of sequences to be trained on
-
-	test1 = ["A", "B", "C", "G"]
-	test2 = ["D", "B", "C", "G"]
-	# test3 = ["X", "Y"]
-	# tests = [test1, test2]
-	#test2 = ["X", "B", "C", "Y"]
-	#test3 = ["E", "B", "C", "F"]
-	#test4 = ["X", "B", "F", "D"]
-
-	tests = [test1, test2]										# list of sequences to be tested on
-
-	W = np.zeros((n), dtype = int)								# feed-forward input representing a syllable
-									
-	def isSegmentActive(i, j, k, D, Mat):						# if no. of connected synapses to active cells > theta in any distal segment of current cell
-		segment = D[i][j][k]
-		count = 0
-		for x, y in np.ndindex(m, n):
-			if (Mat[y] & (1 << x) != 0) and (segment[x][y]>beta):
-				count = count + 1
-				if count >= theta:
-					return True
-		return False
-
-	def count_connected_synapses(Mat, Segment):
-		count = 0.0
-		for x, y in np.ndindex(m, n):
-			if (Mat[y] & (1 << x) != 0) and (Segment[x][y]>beta):
-				count = count + 1
-		return count
-
-	def closest_to_connected_synapses(Mat, Segment):
-		count = 0.0
-		for x, y in np.ndindex(m, n):
-			if (Mat[y] & (1 << x) != 0) and (Segment[x][y]>0.0):
-				count = count + Segment[x][y]
-		return count
-
-	def reinforce(i, j, k, D, Dnew):
-		Mat = A['t-1']
-		segmentOld = D[i][j][k]
-		segmentNew = Dnew[i][j][k]
-		for x, y in np.ndindex(m, n):
-			delta = 0.0
-			if (Mat[y] & (1 << x) != 0): #and segmentOld[x][y] != 0:
-				delta = delta + pPos
-			else:
-				delta = delta - pNeg
-			segmentNew[x][y] = segmentOld[x][y] + delta
-			segmentNew[x][y] = min(1, segmentNew[x][y])
-			segmentNew[x][y] = max(0, segmentNew[x][y])
-		# print segmentOld, segmentNew
-		Dnew[i][j][k] = segmentNew
-
-	def decay(x, y, z, D, Dnew):
-		segmentOld = D[x][y][z]
-		segmentNew = Dnew[x][y][z]
-		segmentNew = segmentOld - pDec
-		for i, j in np.ndindex(m, n):
-			segmentNew[i][j] = max(0, segmentNew[i][j])
-		Dnew[x][y][z] = segmentNew
-
-		# for l in np.ndindex(s):
-		# 	synapseOld = D[x][y][z][l]
-		# 	synapseNew = Dnew[x][y][z][l]
-		# 	synapseNew["cw"] = synapseOld["cw"] - pDec
-		# 	if synapseNew["cw"] < 0.0:
-		# 		synapseNew["cw"] = 0.0
-		# 	if synapseNew["cw"] > 1.0:
-		# 		synapseNew["cw"] = 1.0
-		# 	Dnew[x][y][z][l]["x"] = synapseOld["x"]
-		# 	Dnew[x][y][z][l]["y"] = synapseOld["y"]
-		# 	Dnew[x][y][z][l]["cw"] = synapseNew["cw"]
-			
-	def repr_human(Mat):
-		text = ""
-		for i in range(m):
-			row = ""
-			for j in range(n):
-				if Mat[j] & (1<<i) != 0:
-					row += "+"									#	+ -> Active
-				else:	
-					row += "-"									#	- -> Inactive
-			text += row
-			text += '\n'
-		return text
-	
-	active_cells = []
-	training_results = []
-
-	flagAltSeq = 2												# 0 -> Alternating; 1 -> Sequential; 2 -> Few each
-
-	for ntrials in range(nTrainingTrials):
-		for seq in sequences:
-			for nr in range(nRepConsecutive):
-				current_result = []
-				for syllable in seq:
-					W = S[syllable]									# marks winning columns
-					A['t'] = 0
-					P['t'] = 0
-
-					# ---- Step 3: Learning ---- #
-					np.copyto(Dnew, D)  # Dnew = D
-
-					for j in np.ndindex(n):							# active dendritic segment reinforced if cell predicted correctly
-						if W[j] == 1:
-							if P['t-1'][j] != 0:
-								for i in range(m):
-									if ((P['t-1'][j] & (1<<i)) != 0):
-										for k in np.ndindex(d):
-											if isSegmentActive(i, j, k, D, A['t-1']) == True:
-												reinforce(i, j, k, D, Dnew)
-												
-
-							else:									# if current winning column not predicted
-								maxCloseness = 0.0
-								maxRow = np.random.random_integers(0, m-1)
-								maxSeg = np.random.random_integers(0, d-1)
-								if chooseMax == 1:
-									for i, k in np.ndindex(m, d):		# to find distal segment in current column closest to activation
-										if maxCondition == 0:
-											currCloseness = count_connected_synapses(A['t-1'], D[i][j][k])
-										else:
-											currCloseness = closest_to_connected_synapses(A['t-1'], D[i][j][k])
-										if maxCloseness < currCloseness:
-											maxCloseness = currCloseness
-											maxRow = i
-											maxSeg = k
-								# print "Here ", seq, syllable, ntrials*nRepConsecutive+nr, maxRow, j, maxSeg, maxCloseness
-								
-								reinforce(maxRow, j, maxSeg, D, Dnew)
-								
-
-			# ---- Step 2: Computing cell states ---- #
-
-					Atemp1 = P['t-1'] * W
-					Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
-					A['t'] = Atemp1 + Atemp2
-
-					for i,j in np.ndindex(m,n):
-						if (A['t'][j] & 1<<i) == 0:
-							for k in np.ndindex(d):
-								if isSegmentActive(i, j, k, D, A['t-1']) == True:
-									decay(i, j, k, D, Dnew)
+    tests = [test1, test2]                                  # list of sequences to be tested on
 
 
-					for i,j in np.ndindex(m,n):						# computing predictive state for this time step
-						for k in np.ndindex(d):
-							if isSegmentActive(i, j, k, Dnew, A['t']) == True:
-								P['t'][j] = P['t'][j] | 1<<i
-					   			break
-					np.copyto(D, Dnew) # D[...] = Dnew
+    # ---- methods ---- #
 
-					
-					out = ""
-					outputW = A['t'] > 0
-						
-					for syll in S:
-						if ((outputW & S[syll]) == S[syll]).all():
-							out = out + syll
+    # a distal segment is active, if the no. of connected synapses to active cells is greater than theta in that segment    
+    def isSegmentActive(Mat, Segment):
+        count = 0
+        for x, y in np.ndindex(m, n):
+            if (Mat[y] & (1 << x) != 0) and (Segment[x][y]>beta):
+                count = count + 1
+                if count >= theta:
+                    return True
+        return False
 
-					pred = ""
-					predW = P['t-1'] > 0
-						
-					for syll in S:
-						if ((predW & S[syll]) == S[syll]).all():
-							pred = pred + syll
+    # returns the no. of synapses connected to active cells
+    def count_connected_synapses(Mat, Segment):
+        count = 0.0
+        for x, y in np.ndindex(m, n):
+            if (Mat[y] & (1 << x) != 0) and (Segment[x][y]>beta):
+                count = count + 1
+        return count
 
-					if nr == nRepConsecutive - 1:	
-						syllable_result = {}
-						syllable_result["prediction"] = pred
-						syllable_result["P['t-1']"] = repr_human(P['t-1'])
-						syllable_result["output"] = out
-						syllable_result["A['t']"] = repr_human(A['t'])
-						current_result.append(syllable_result)
+    # returns the sum of connection weights of synapses to active cells
+    def closest_to_connected_synapses(Mat, Segment):
+        count = 0.0
+        for x, y in np.ndindex(m, n):
+            if (Mat[y] & (1 << x) != 0) and (Segment[x][y]>0.0):
+                count = count + Segment[x][y]
+        return count
 
-					P['t-1'] = 0
-					A['t-1'] = 0
-					P['t-1'] = P['t']
-					A['t-1'] = A['t']
-					A['t'] = 0
-					P['t'] = 0
-					
-				# reset on encountering "end" syllable
-				P['t-1'] = 0
-				A['t-1'] = 0
-				active_cells = []
+    # increases weights of the synapses to active cells and decreases weights of the rest
+    def reinforce(x, y, z, D, Dnew, Mat):
+        segmentOld = D[x][y][z]
+        segmentNew = Dnew[x][y][z]
+        for i, j in np.ndindex(m, n):
+            delta = 0.0
+            if (Mat[j] & (1 << i) != 0):
+                delta = delta + pPos
+            else:
+                delta = delta - pNeg
+            segmentNew[i][j] = segmentOld[i][j] + delta
+            segmentNew[i][j] = min(1, segmentNew[i][j])
+            segmentNew[i][j] = max(0, segmentNew[i][j])
+        Dnew[x][y][z] = segmentNew
 
-			if ntrials == nTrainingTrials - 1:
-				training_results.append({
-					"Training Result": current_result 
-				})
+    # decreases weights of all synapses in the segment
+    def decay(x, y, z, D, Dnew):
+        segmentOld = D[x][y][z]
+        segmentNew = Dnew[x][y][z]
+        segmentNew = segmentOld - pDec
+        for i, j in np.ndindex(m, n):
+            segmentNew[i][j] = max(0, segmentNew[i][j])
+        Dnew[x][y][z] = segmentNew
+
+    # to print the matrix as a single line
+    def repr_human(Mat):
+
+        if repr_matrix_form == False:
+            text = ""
+            for i in range(m):
+                row = ""
+                for j in range(n):
+                    if Mat[j] & (1<<i) != 0:
+                        row += "+"                              #   + -> Active
+                    else:   
+                        row += "-"                              #   - -> Inactive
+                text += row
+                text += '\n'
+            return text
+
+        else:
+            matrix = []
+            for i in range(m):
+                row = ""
+                for j in range(n):
+                    if Mat[j] & (1<<i) != 0:
+                        row += "+"                              #   + -> Active
+                    else:   
+                        row += "-"                              #   - -> Inactive
+                matrix.append(row)
+            return matrix
 
 
-	print "Testing"
-	
-	testing_results = []
-	# predictions = []
-	# got_1_flag = False
-	# got_2_flag = False
-	# got_both_flag = False
+    # ---- Step 1: Initialisation ---- #
+    
+    # encoding for each syllable
+    S = { "A" : np.array([1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
+          "B" : np.array([0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]),
+          "C" : np.array([0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0]), 
+          "D" : np.array([0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0]), 
+          "E" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0]), 
+          "F" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0]), 
+          "G" : np.array([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1]),  }
 
-	for test in tests:
-		current_result = []
-		seq_predicted = [test[0]]
-		for syllable in test:
-			W = S[syllable]										# marks winning columns
-			A['t'] = 0
-			P['t'] = 0
+    A = np.zeros((n), dtype = [("t", int), ("t-1", int)])                   # activation matrix
+    P = np.zeros((n), dtype = [("t", int), ("t-1", int)])                   # prediction matrix
+    D = np.zeros((m, n, d, m, n), dtype = float)                            # matrix with synaptic weights
+    W = np.zeros((n), dtype = int)                                          # feed-forward input representing a syllable
+    Dnew = np.zeros((m, n, d, m, n), dtype = float)                         # temporary matrix to store updates in a trial
 
-			Atemp1 = P['t-1'] * W
-			Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
-			A['t'] = Atemp1 + Atemp2
+    training_results = []                                                               # to store the final results of training
+    testing_results = []                                                                # to store the final results of testing
+    
+    # initialising each synapses with random weights
+    for i, j, k, p, q in np.ndindex(m, n, d, m, n):
+        if i!=p or j!=q:
+            D[i][j][k][p][q] = np.random.uniform(0, initialisingLimit)
 
-			# for j in np.ndindex(n):
-			# 	# A['t'][j] = 0
-			# 	# P['t'][j] = 0
-			# 	if W[j] == 1:
-			# 		if P['t-1'][j] != 0:
-			# 			A['t'][j] = P['t-1'][j]					# cell activated if present in winning column and if predicted previously
-			# 		else:
-			# 			A['t'][j] = pow(2,m)-1					# cell activated if present in winning column and if no cell in the column had been predicted
-						    		
-			for i,j in np.ndindex(m,n):						# computing predictive state for this time step
-				for k in np.ndindex(d):
-					if isSegmentActive(i, j, k, D, A['t']) == True:
-						P['t'][j] = P['t'][j] | 1<<i
-			   			break
 
-			out = ""
-			outputW = A['t'] > 0
-				
-			for syll in S:
-				if ((outputW & S[syll]) == S[syll]).all():
-					out = out + syll
+    # ---- Training ---- #
 
-			pred = ""
-			predW = P['t'] > 0
-			
-			for syll in S:
-				if ((predW & S[syll]) == S[syll]).all():
-					pred = pred+syll
-			
-			syllable_result = {}
-			syllable_result["prediction"] = pred
-			syllable_result["P['t']"] = repr_human(P['t'])
-			syllable_result["output"] = out
-			syllable_result["A['t']"] = repr_human(A['t'])
-			current_result.append(syllable_result)
-			seq_predicted.append(pred)
+    for nBlocks in range(nTrainingBlocks):
+        for seq in sequences:
+            for nr in range(nRepConsecutive):
+                current_result = []
+                for syllable in seq:
+                    W = S[syllable]
+                    A['t'] = 0
+                    P['t'] = 0
 
-			P['t-1'] = 0
-			A['t-1'] = 0
-			P['t-1'] = P['t']
-			A['t-1'] = A['t']
-			A['t'] = 0
-			P['t'] = 0
-		
-		P['t-1'] = 0
-		A['t-1'] = 0
-		testing_results.append({
-			"Test Result": current_result 
-		})
-	# 	predictions.append(seq_predicted)
-	# if predictions[0] == sequences[0]:
-	# 	got_1_flag = True
-	# if predictions[1] == sequences[1]:
-	# 	got_2_flag = True
-	# if predictions == sequences:
-	# 	got_both_flag = True
+                    # ---- Step 3: Learning ---- #
 
-	print "Writing to json file: ", resFile
-	layer_parameters = {
-		"no. of columns in a layer [n]": n,
-		"no. of cells per column [m]": m,
-		"no. of distal segments per cell [d]": d,
-	#	"no. of potential synapses per segment [s]": s,
-	}
-	synapse_parameters = {
-		"synapse connectivity threshold [beta]": beta,
-		"segment activation threshold [theta]": theta,
-		"synaptic permanence [synPerm]": synPerm,
-		"synapses initialised with connectivity weight upto": initialisingLimit 
-	#	"synapses replaced after steps [nStepReplace]": nStepReplace,
-	}
+                    np.copyto(Dnew, D)                                                              # Dnew = D
 
-	learning_parameters = {
-		"long term potentiation [pPos]": pPos,
-		"long term depression [pNeg]": pNeg,
-		"decay [pDec]": pDec,
-		"no. of trials in training [nTrainingTrials]": nTrainingTrials,
-		"no. of consecutive runs in each trial": nRepConsecutive,
-		"alternating/sequential": flagAltSeq,
-		"choose the segment with maximum match": chooseMax
-	}
+                    for j in np.ndindex(n):
+                        if W[j] == 1:                                                               # selecting the "winning" columns
 
-	random_parameters = {
-		"seed [rSeed]": rSeed
-	}
+                            # if any cell is predicted in the winning column, the segment that caused this is reinforced
+                            if P['t-1'][j] != 0:
+                                for i in range(m):
+                                    if ((P['t-1'][j] & (1<<i)) != 0):                               # accessing the 'i'th row in the 'j'th column
+                                        for k in np.ndindex(d):
+                                            if isSegmentActive(A['t-1'], D[i][j][k]) == True:
+                                                reinforce(i, j, k, D, Dnew, A['t-1'])
+                                                
+                            # if no cell in the winning column is predicted, a segment is chosen to represent it and reinforced
+                            else:
+                                maxCloseness = 0.0
+                                maxRow = np.random.random_integers(0, m-1)
+                                maxSeg = np.random.random_integers(0, d-1)
+                                
+                                # if the 'best matching' segment is to be chosen [not random selection]
+                                if chooseMax == 1:
 
-	input_parameters = {
-		"Layer Parameters": layer_parameters,
-		"Synapse Parameters": synapse_parameters,
-		"Learning Parameters": learning_parameters,
-		"Random Parameters": random_parameters,
-	}
+                                    if maxCondition == 0:
+                                        maxCloseness = count_connected_synapses(A['t-1'], D[maxRow][j][maxSeg])
+                                    elif maxCondition == 1:
+                                        maxCloseness = closest_to_connected_synapses(A['t-1'], D[maxRow][j][maxSeg])
 
-	results = {
-		"Training Results": training_results,
-		"Testing Results": testing_results
-	}
+                                    for i, k in np.ndindex(m, d):
+                                        if maxCondition == 0:
+                                            currCloseness = count_connected_synapses(A['t-1'], D[i][j][k])
+                                        elif maxCondition == 1:
+                                            currCloseness = closest_to_connected_synapses(A['t-1'], D[i][j][k])
 
-	Data = {
-		"Input": input_parameters,
-		"Results": results
-	}
+                                        if maxCloseness < currCloseness:
+                                            maxCloseness = currCloseness
+                                            maxRow = i
+                                            maxSeg = k
 
-	with open(resFile, 'w') as outfile:  
-	    json.dump(Data, outfile, sort_keys=True, indent=4, separators=(',', ':\t'))
-	# return got_1_flag, got_2_flag, got_both_flag
-	return
+                                reinforce(maxRow, j, maxSeg, D, Dnew, A['t-1'])
+                                
+
+            # ---- Step 2: Computing cell states ---- #
+
+                    # to compute the activation matrix in the new timestep
+                    Atemp1 = P['t-1'] * W
+                    Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
+                    A['t'] = Atemp1 + Atemp2
+
+                    # for j in np.ndindex(n):
+                    #   A['t'][j] = 0
+                    #   P['t'][j] = 0
+                    #   if W[j] == 1:
+                    #       if P['t-1'][j] != 0:
+                    #           A['t'][j] = P['t-1'][j]             
+                    #       else:
+                    #           A['t'][j] = pow(2,m) - 1            
+
+                    # to decay active segments of cells that did not become active
+                    for i,j in np.ndindex(m,n):
+                        if (A['t'][j] & 1<<i) == 0:
+                            for k in np.ndindex(d):
+                                if isSegmentActive(A['t-1'], D[i][j][k]) == True:
+                                    decay(i, j, k, D, Dnew)
+
+
+                    # to compute the predictive state for this time step
+                    for i,j in np.ndindex(m,n):
+                        for k in np.ndindex(d):
+                            if isSegmentActive(A['t'], Dnew[i][j][k]) == True:
+                                P['t'][j] = P['t'][j] | 1<<i
+                                break
+                    np.copyto(D, Dnew) # D[...] = Dnew
+
+                    
+                    # to interpret activation in current state
+                    out = ""
+                    outputW = A['t'] > 0
+                        
+                    for syll in S:
+                        if ((outputW & S[syll]) == S[syll]).all():
+                            out = out + syll
+
+                    # to interpret prediction in previous state
+                    pred = ""
+                    predW = P['t-1'] > 0
+                        
+                    for syll in S:
+                        if ((predW & S[syll]) == S[syll]).all():
+                            pred = pred + syll
+
+                    # to store results of current time step in last trial
+                    if nr == nRepConsecutive - 1:   
+                        syllable_result = {}
+                        syllable_result["prediction"] = pred
+                        syllable_result["P['t-1']"] = repr_human(P['t-1'])
+                        syllable_result["output"] = out
+                        syllable_result["A['t']"] = repr_human(A['t'])
+                        current_result.append(syllable_result)
+
+                    # reset for each timestep
+                    P['t-1'] = 0
+                    A['t-1'] = 0
+                    P['t-1'] = P['t']
+                    A['t-1'] = A['t']
+                    A['t'] = 0
+                    P['t'] = 0
+                    
+                # reset on encountering "end" syllable i.e. end of sequence
+                P['t-1'] = 0
+                A['t-1'] = 0
+                active_cells = []
+
+            # to store results of last trial
+            if nBlocks == nTrainingBlocks - 1:
+                training_results.append({
+                    "Training Result": current_result 
+                })
+
+
+    # ---- Testing ---- #
+    print "Testing"
+    
+    for test in tests:
+        current_result = []
+        seq_predicted = [test[0]]
+        for timeStep in range(len(test)-1):
+            syllable = test[timeStep]
+            W = S[syllable]                                     # marks winning columns
+            A['t'] = 0
+            P['t'] = 0
+
+            # computing activation for current time step
+            A['t'] = P['t-1']                                   # for free testing
+
+            if timeStep == 0 or testFreeFlag == 0:              # for constrained testing and first timestep
+                Atemp1 = P['t-1'] * W
+                Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
+                A['t'] = Atemp1 + Atemp2
+
+            # computing predictive state for current time step                      
+            for i,j in np.ndindex(m,n):
+                for k in np.ndindex(d):
+                    if isSegmentActive(A['t'], D[i][j][k]) == True:
+                        P['t'][j] = P['t'][j] | 1<<i
+                        break
+
+            # to interpret activation in current state
+            out = ""
+            outputW = A['t'] > 0
+                
+            for syll in S:
+                if ((outputW & S[syll]) == S[syll]).all():
+                    out = out + syll
+
+            # to interpret prediction in current state
+            pred = ""
+            predW = P['t'] > 0
+            
+            for syll in S:
+                if ((predW & S[syll]) == S[syll]).all():
+                    pred = pred+syll
+            
+            # to store results of current time step
+            syllable_result = {}
+            syllable_result["prediction"] = pred
+            syllable_result["P['t']"] = repr_human(P['t'])
+            syllable_result["output"] = out
+            syllable_result["A['t']"] = repr_human(A['t'])
+            current_result.append(syllable_result)
+            seq_predicted.append(pred)
+
+            # reset for each timestep
+            P['t-1'] = 0
+            A['t-1'] = 0
+            P['t-1'] = P['t']
+            A['t-1'] = A['t']
+            A['t'] = 0
+            P['t'] = 0
+        
+        # reset on encountering "end" syllable i.e. end of sequence
+        P['t-1'] = 0
+        A['t-1'] = 0
+        
+        # to store final results of current test sequence
+        testing_results.append({
+            "Sequence Tested": test,
+            "Sequence Predicted": seq_predicted,
+            "Test Result": current_result 
+        })
+
+        # denotes if all sequences were predicted accurately
+        got_all_flag = got_all_flag & (seq_predicted == test)
+        
+
+    # ---- Printing results to a json file ---- #
+
+    print "Writing to json file: ", resFile
+    layer_parameters = {
+        "no. of columns in a layer [n]": n,
+        "no. of cells per column [m]": m,
+        "no. of distal segments per cell [d]": d,
+        # "no. of potential synapses per segment [s]": s,
+    }
+    synapse_parameters = {
+        "synapse connectivity threshold [beta]": beta,
+        "segment activation threshold [theta]": theta,
+        "upper limit of initialisation": initialisingLimit
+    }
+
+    learning_parameters = {
+        "long term potentiation [pPos]": pPos,
+        "long term depression [pNeg]": pNeg,
+        "decay [pDec]": pDec,
+        "no. of trials in training [nTrainingTrials]": nTrainingTrials,
+        "no. of consecutive trials for same sequence": nRepConsecutive,
+        "choose maximum acc. to which algo": chooseMax,
+        "choosing max acc to countConnectedSynapses(0) or closest to activation(1)": maxCondition,
+    }
+
+    testing_parameters = {
+        "testing type (constrained(0) / free(1))": testFreeFlag,
+        "seed [rSeed]": rSeed
+    }
+
+    input_parameters = {
+        "Layer Parameters": layer_parameters,
+        "Synapse Parameters": synapse_parameters,
+        "Learning Parameters": learning_parameters,
+        "Testing Parameters": testing_parameters,
+    }
+
+    results = {
+        # "Training Results": training_results,
+        "Testing Results": testing_results
+    }
+
+    Data = {
+        "GitHash": "",
+        "Input": input_parameters,
+        "Results": results
+    }
+
+    with open(resFile, 'w') as outfile:  
+        json.dump(Data, outfile, sort_keys=True, indent=4, separators=(',', ':\t'))
+    
+    return got_all_flag
