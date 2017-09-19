@@ -4,7 +4,7 @@ import json
 import numpy as np
 
 
-def HTM(arg_resFile):                       # change parameters according to which one you want to test
+def HTM(arg_resFile):                                       # change parameters according to which one you want to test
     
     # ---- Parameters ---- #
 
@@ -28,19 +28,22 @@ def HTM(arg_resFile):                       # change parameters according to whi
     maxCondition = 2                                        # 0 -> # connected synapses 1 -> closest to activation by summation 2 -> # positive synapses
     replaceSynapses = 1                                     # 0 -> off 1 -> on
 
+    testFreeFlag = 1                                        # 0 -> testing with feed-forward input; 1 -> free testing
+
     rSeed = np.random.randint(0,1e7)                        # seed
     np.random.seed(rSeed)
 
     resFile = arg_resFile                                   # name of result file
-    repr_matrix_form = False                                # 1 -> as a matrix; 0 -> whole matrix in 1 line
+    repr_matrix_form = True                                 # 1 -> as a matrix; 0 -> whole matrix in 1 line
+    got_all_flag = True                                     # to denote if all the predictions were correct or not
 
     seq1 = ["A", "B", "C", "G", "E"]
     seq2 = ["D", "B", "C", "G", "F"]
 
     sequences = [seq1, seq2]                                # list of sequences to be trained on
 
-    test1 = ["A", "B", "C", "G"]
-    test2 = ["D", "B", "C", "G"]
+    test1 = ["A", "B", "C", "G", "E"]
+    test2 = ["D", "B", "C", "G", "F"]
 
     tests = [test1, test2]                                  # list of sequences to be tested on
 
@@ -59,7 +62,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
         #   synapse = D[i][j][k][l]
         #   if synapse["cw"] > beta and ((Mat[synapse["y"]] & (1<<synapse["x"]))!=0):
         #       count = count + 1
-        return count
+        return count >= theta
 
     # returns the no. of synapses existing to active cells
     def count_positive_synapses(Mat, Segment):
@@ -103,14 +106,13 @@ def HTM(arg_resFile):                       # change parameters according to whi
         return count
 
     # increases weights of the synapses to active cells and decreases weights of the rest
-    def reinforce(x, y, z, D, Dnew, Mat):
-        segmentOld = D[x][y][z]
+    def reinforce(x, y, z, Dnew, Mat):
         segmentNew = Dnew[x][y][z]
-        deltaPos = ((Mat[segmentOld["y"]]) & (1<<segmentOld["x"])) != 0
+        deltaPos = ((Mat[segmentNew["y"]]) & (1<<segmentNew["x"])) != 0
         deltaNeg = ~deltaPos
         deltaPos = pPos * deltaPos
         deltaNeg = pNeg * deltaNeg
-        segmentNew["cw"] = segmentOld["cw"] + deltaPos - deltaNeg
+        segmentNew["cw"] = segmentNew["cw"] + deltaPos - deltaNeg
         tempA = segmentNew["cw"] > 1.0
         tempB = (~tempA) * segmentNew["cw"]
         segmentNew["cw"] = tempA + tempB
@@ -122,18 +124,17 @@ def HTM(arg_resFile):                       # change parameters according to whi
         #   synapseNew = Dnew[x][y][z][l]
         #   delta = 0.0
         #   if ((A['t-1'][synapseOld["y"]]) & (1<<synapseOld["x"])) != 0:
-        #       delta = delta + pPos                            # reinforcing synapses to active cells
+        #       delta = delta + pPos                            
         #   else:
-        #       delta = delta - pNeg                            # negatively reinforcing synapses to inactive cells
+        #       delta = delta - pNeg                            
         #   synapseNew["cw"] = synapseOld["cw"] + delta
-        #   synapseNew["cw"] = max(0, synapseNew["cw"]
-        #   synapseNew["cw"] = min(1, synapseNew["cw"]
+        #   synapseNew["cw"] = max(0, synapseNew["cw"])
+        #   synapseNew["cw"] = min(1, synapseNew["cw"])
 
     # decreases weights of all synapses in the segment
-    def decay(x, y, z, D, Dnew):
-        segmentOld = D[x][y][z]
+    def decay(x, y, z, Dnew):
         segmentNew = Dnew[x][y][z]
-        segmentNew["cw"] = segmentOld["cw"] - pDec
+        segmentNew["cw"] = segmentNew["cw"] - pDec
         tempA = segmentNew["cw"] > 1.0
         tempB = (~tempA) * segmentNew["cw"]
         segmentNew["cw"] = tempA + tempB
@@ -176,7 +177,6 @@ def HTM(arg_resFile):                       # change parameters according to whi
             return matrix
 
 
-                     
     # ---- Step 1: Initialisation ---- #
 
     # encoding for each syllable
@@ -197,9 +197,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
     active_cells = []                                                                   # to store the active cells
     training_results = []                                                               # to store the final results of training
     testing_results = []                                                                # to store the final results of testing
-    predictions = []                                                                    # to check predictions
-    got_all_flag = False                                                                # to denote if all the predictions were correct or not
-
+    
     # initialising each distal segment with synapses to random cells with random weights
     for i, j, k, l in np.ndindex(m, n, d, s):
         x = np.random.randint(0, m)
@@ -217,7 +215,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
 
     # ---- Training ---- #
 
-    for ntrials in range(nTrainingBlocks):
+    for nBlocks in range(nTrainingBlocks):
         for seq in sequences:
             for nr in range(nRepConsecutive):
                 current_result = []
@@ -238,8 +236,8 @@ def HTM(arg_resFile):                       # change parameters according to whi
                                 for i in range(m):
                                     if ((P['t-1'][j] & (1<<i)) != 0):                               # accessing the 'i'th row in the 'j'th column
                                         for k in np.ndindex(d):
-                                            if isSegmentActive(A['t-1'], D[i][j][k]) >= theta:
-                                                reinforce(i, j, k, D, Dnew, A['t-1'])
+                                            if isSegmentActive(A['t-1'], D[i][j][k]) == True:
+                                                reinforce(i, j, k, Dnew, A['t-1'])
                             
                             # if no cell in the winning column is predicted, a segment is chosen to represent it and reinforced
                             else:
@@ -287,13 +285,12 @@ def HTM(arg_resFile):                       # change parameters according to whi
                                                 Dnew[maxRow][j][maxSeg][l]["cw"] = np.random.uniform(beta, 1.0)
                                                 break
                                 
-                                reinforce(maxRow, j, maxSeg, D, Dnew, A['t-1'])
+                                reinforce(maxRow, j, maxSeg, Dnew, A['t-1'])
                     
 
                     # ---- Step 2: Computing cell states ---- #
 
                     active_cells = []
-
 
                     # to compute the activation matrix in the new timestep
                     Atemp1 = P['t-1'] * W                                               # a cell in the winning column is activated, if predicted previously
@@ -322,22 +319,22 @@ def HTM(arg_resFile):                       # change parameters according to whi
                     for i,j in np.ndindex(m,n):
                         if (A['t'][j] & (1<<i)) == 0:
                             for k in np.ndindex(d):
-                                if isSegmentActive(A['t-1'], D[i][j][k]) >= theta:
-                                    decay(i, j, k, D, Dnew)
+                                if isSegmentActive(A['t-1'], D[i][j][k]) == True:
+                                    decay(i, j, k, Dnew)
 
 
                     # to compute the predictive state for this time step
                     for i,j in np.ndindex(m,n):                     
                         for k in np.ndindex(d):
-                            if isSegmentActive(A['t'], Dnew[i][j][k]) >= theta:
+                            if isSegmentActive(A['t'], Dnew[i][j][k]) == True:
                                 P['t'][j] = P['t'][j] | 1<<i
                                 break
                    
                     
-                    np.copyto(D, Dnew) # D[...] = Dnew
+                    np.copyto(D, Dnew)                                                  # D[...] = Dnew
 
                     
-                    # to interpret current state
+                    # to interpret activation in current state
                     out = ""
                     outputW = A['t'] > 0
                         
@@ -345,6 +342,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
                         if ((outputW & S[syll]) == S[syll]).all():
                             out = out + syll
 
+                    # to interpret prediction in previous state
                     pred = ""
                     predW = P['t-1'] > 0
                         
@@ -352,6 +350,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
                         if ((predW & S[syll]) == S[syll]).all():
                             pred = pred + syll
 
+                    # to store results of current time step in last trial
                     if nr == nRepConsecutive - 1:       
                         syllable_result = {}
                         syllable_result["prediction"] = pred
@@ -360,6 +359,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
                         syllable_result["A['t']"] = repr_human(A['t'])
                         current_result.append(syllable_result)
 
+                    # reset for each timestep
                     P['t-1'] = 0
                     A['t-1'] = 0
                     P['t-1'] = P['t']
@@ -372,33 +372,42 @@ def HTM(arg_resFile):                       # change parameters according to whi
                 A['t-1'] = 0
                 active_cells = []
 
-            if ntrials == nTrainingBlocks - 1:
+            # to store results of last trial
+            if nBlocks == nTrainingBlocks - 1:
                 training_results.append({
                     "Training Result": current_result 
                 })
 
 
     # ---- Testing ---- #
+
     print "Testing"
 
     for test in tests:
         current_result = []
         seq_predicted = [test[0]]
-        for syllable in test:
+        for timeStep in range(len(test)-1):
+            syllable = test[timeStep]
             W = S[syllable]                                     # marks winning columns
             A['t'] = 0
             P['t'] = 0
 
-            Atemp1 = P['t-1'] * W
-            Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
-            A['t'] = Atemp1 + Atemp2
+            # computing activation for current time step
+            A['t'] = P['t-1']                                   # for free testing
 
+            if timeStep == 0 or testFreeFlag == 0:              # for constrained testing and first timestep
+                Atemp1 = P['t-1'] * W
+                Atemp2 = ((Atemp1 != 0) != W) * (pow(2,m)-1)
+                A['t'] = Atemp1 + Atemp2
+
+            # computing predictive state for current time step
             for i,j in np.ndindex(m,n):                     
                 for k in np.ndindex(d):
-                    if isSegmentActive(A['t'], D[i][j][k]) >= theta:
+                    if isSegmentActive(A['t'], D[i][j][k]) == True:
                         P['t'][j] = P['t'][j] | 1<<i
                         break
 
+            # to interpret activation in current state
             out = ""
             outputW = A['t'] > 0
                 
@@ -406,6 +415,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
                 if ((outputW & S[syll]) == S[syll]).all():
                     out = out + syll
 
+            # to interpret prediction in current state
             pred = ""
             predW = P['t'] > 0
             
@@ -413,6 +423,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
                 if ((predW & S[syll]) == S[syll]).all():
                     pred = pred+syll
             
+            # to store results of current time step
             syllable_result = {}
             syllable_result["prediction"] = pred
             syllable_result["P['t']"] = repr_human(P['t'])
@@ -421,6 +432,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
             current_result.append(syllable_result)
             seq_predicted.append(pred)
 
+            # reset for each timestep
             P['t-1'] = 0
             A['t-1'] = 0
             P['t-1'] = P['t']
@@ -428,18 +440,21 @@ def HTM(arg_resFile):                       # change parameters according to whi
             A['t'] = 0
             P['t'] = 0
         
+        # reset on encountering "end" syllable i.e. end of sequence
         P['t-1'] = 0
         A['t-1'] = 0
         
+        # to store final results of current test sequence
         testing_results.append({
+            "Sequence Tested": test,
+            "Sequence Predicted": seq_predicted,
             "Test Result": current_result 
         })
-        predictions.append(seq_predicted)
-    
-    if predictions == sequences:
-        got_all_flag = True
+        
+        # denotes if all sequences were predicted accurately
+        got_all_flag = got_all_flag & (seq_predicted == test)
+        
 
-    
     # ---- Printing results to a json file ---- #
 
     print "Writing to json file: ", resFile
@@ -449,6 +464,7 @@ def HTM(arg_resFile):                       # change parameters according to whi
         "no. of distal segments per cell [d]": d,
         "no. of potential synapses per segment [s]": s,
     }
+    
     synapse_parameters = {
         "synapse connectivity threshold [beta]": beta,
         "segment activation threshold [theta]": theta,
@@ -466,7 +482,8 @@ def HTM(arg_resFile):                       # change parameters according to whi
         "synapse replacement": replaceSynapses
     }
 
-    random_parameters = {
+    testing_parameters = {
+        "testing type (constrained(0) / free(1))": testFreeFlag,
         "seed [rSeed]": rSeed
     }
 
@@ -474,11 +491,11 @@ def HTM(arg_resFile):                       # change parameters according to whi
         "Layer Parameters": layer_parameters,
         "Synapse Parameters": synapse_parameters,
         "Learning Parameters": learning_parameters,
-        "Random Parameters": random_parameters,
+        "Testing Parameters": testing_parameters,
     }
 
     results = {
-        "Training Results": training_results,
+        # "Training Results": training_results,
         "Testing Results": testing_results
     }
 
