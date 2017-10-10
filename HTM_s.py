@@ -1,3 +1,17 @@
+### ------------------------------------------------------------------------------------ ###
+
+# This code is a modification of Numenta Inc.'s HTM model 
+# by S. Remya, Nicolas Rougier and Arthur Leblois
+# with reference to the paper mentioned below.
+# https://doi.org/10.3389/fncir.2016.00023
+
+# The model attempts to emulate a juvenile bird learning its song from a tutor.
+# In the sensory phase of this learning, the young bird remembers the song it hears and
+# in the sensorimotor phase, it tries to replicate it.
+# This code is concerned with the sensory phase.
+
+### ------------------------------------------------------------------------------------ ###
+
 # coding: utf-8
 
 import json
